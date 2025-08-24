@@ -1,0 +1,137 @@
+# .github/workflows/build_ipa.yml
+
+name: Create EeveeSpotifyReborn IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "URL to the decrypted Spotify IPA file"
+        required: true
+        type: string
+      
+      display_name:
+        description: "App Name (Optional)"
+        default: "Spotify"
+        required: false
+        type: string
+
+      bundle_id:
+        description: "BundleID (Optional)"
+        default: "com.spotify.client"
+        required: false
+        type: string
+      
+      info_note:
+        description: "NOTE: This workflow builds from the latest commit."
+        default: "Ensure the provided IPA is compatible."
+        type: string
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build EeveeSpotifyReborn IPA
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout EeveeSpotifyReborn Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Hide sensitive IPA URL
+        uses: levibostian/action-hide-sensitive-inputs@v1
+        with:
+          exclude_inputs: bundle_id,display_name,info_note
+
+      - name: Download and validate IPA
+        run: |
+          wget -q "${{ inputs.ipa_url }}" -O ${{ github.workspace }}/spotify.ipa
+          
+          file_type=$(file --mime-type -b ${{ github.workspace }}/spotify.ipa)
+          
+          if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
+            echo "::error::Validation failed: The downloaded file is not a valid IPA. Detected type: $file_type."
+            exit 1
+          fi
+
+      - name: Install Build Dependencies
+        run: brew install dpkg ldid
+
+      - name: Cache Theos
+        id: theos
+        uses: actions/cache@v4
+        with:
+          path: theos/
+          key: ${{ runner.os }}-theos-cache
+
+      - name: Setup Theos
+        if: steps.theos.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
+
+      - name: Download iOS SDK
+        if: steps.theos.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS17.0.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Install IPA Patcher (pyzule-rw)
+        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Build EeveeSpotifyReborn Debs
+        run: |
+          make clean package FINALPACKAGE=1
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Inject tweaks into IPA
+        id: inject
+        run: |
+          # Find the generated deb files
+          eevee_deb=$(find packages -name 'com.whoeevee.eeveespotifyreborn_*.deb')
+          protobuf_deb=$(find packages -name 'org.swift.protobuf.swiftprotobuf_*.deb')
+          
+          if [ -z "$eevee_deb" ] || [ -z "$protobuf_deb" ]; then
+            echo "::error::Could not find generated .deb files."
+            exit 1
+          fi
+
+          # Prepare arguments for injection
+          tweaks_to_inject="$eevee_deb $protobuf_deb"
+          
+          # Get the app version from the control file
+          app_version=$(grep -o 'Version: .*' control | cut -d' ' -f2)
+          echo "tweak_version=${app_version}" >> $GITHUB_OUTPUT
+
+          output_ipa_name="EeveeSpotifyReborn_${app_version}.ipa"
+
+          cyan -i spotify.ipa -o "$output_ipa_name" -uwef $tweaks_to_inject -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
+          
+          echo "output_name=${output_ipa_name}" >> $GITHUB_OUTPUT
+
+      - name: Upload IPA to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: esp-${{ github.run_number }}
+          name: EeveeSpotifyReborn v${{ steps.inject.outputs.tweak_version }} (${{ github.run_number }})
+          files: ${{ steps.inject.outputs.output_name }}
+          draft: false
+          
+      - name: Output Release URL
+        run: |
+          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
