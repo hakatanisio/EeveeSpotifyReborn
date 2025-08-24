@@ -63,15 +63,17 @@ jobs:
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
       - name: Download EeveeSpotifyReborn Debs
+        id: download_debs
         run: |
-          RELEASE_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}"
+          RELEASE_API_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}"
           
-          # Use curl and robust grep to get the download URLs for both deb files
-          ASSETS_URLS=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | cut -d '"' -f 4)
+          # Fetch the list of assets from the release API
+          ASSETS_JSON=$(curl -s "$RELEASE_API_URL")
           
-          EEVEE_DEB_URL=$(echo "$ASSETS_URLS" | grep "com.whoeevee.eeveespotifyreborn")
-          PROTOBUF_DEB_URL=$(echo "$ASSETS_URLS" | grep "org.swift.protobuf")
-          
+          # Reliably parse the JSON to find the correct download URLs
+          EEVEE_DEB_URL=$(echo "$ASSETS_JSON" | grep -o 'browser_download_url": ".*com.whoeevee.eeveespotifyreborn.*"' | cut -d '"' -f 4)
+          PROTOBUF_DEB_URL=$(echo "$ASSETS_JSON" | grep -o 'browser_download_url": ".*org.swift.protobuf.*"' | cut -d '"' -f 4)
+
           if [ -z "$EEVEE_DEB_URL" ]; then
             echo "::error::Could not find EeveeSpotifyReborn .deb URL for version ${{ inputs.tweak_version }}. Please check if the version tag is correct and assets exist."
             exit 1
