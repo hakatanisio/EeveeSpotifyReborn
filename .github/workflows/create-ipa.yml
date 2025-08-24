@@ -84,14 +84,26 @@ jobs:
         run: |
           git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
           cd sdks
-          SDK_VERSION="iPhoneOS17.5.sdk"
+          
+          # Dynamically find the latest available SDK version in the repository
+          echo "Searching for the latest available SDK..."
+          SDK_VERSION=$(git ls-tree --name-only HEAD | grep '\.sdk$' | sort -V | tail -n 1)
+          
+          if [ -z "$SDK_VERSION" ]; then
+            echo "::error::Could not find any available SDKs in the theos/sdks repository."
+            exit 1
+          fi
+          
+          echo "Found latest SDK: $SDK_VERSION. Attempting to check it out."
+          
           git sparse-checkout set --no-cone "$SDK_VERSION"
           git checkout
           
           if [ -d "$SDK_VERSION" ]; then
+            echo "Successfully checked out $SDK_VERSION."
             mv "$SDK_VERSION" $THEOS/sdks/
           else
-            echo "::error::Failed to checkout SDK: $SDK_VERSION"
+            echo "::error::Failed to checkout SDK ($SDK_VERSION) even after finding it in the repository list."
             exit 1
           fi
         env:
@@ -102,9 +114,7 @@ jobs:
 
       - name: Build EeveeSpotifyReborn Debs
         run: |
-          # First, build Swift Package dependencies
           swift build --product EeveeSpotifyC --configuration release
-          # Now, build the tweak package with Theos
           make clean package FINALPACKAGE=1
         env:
           THEOS: ${{ github.workspace }}/theos
