@@ -84,12 +84,10 @@ jobs:
         run: |
           git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
           cd sdks
-          # Corrected to a recent, available SDK version
           SDK_VERSION="iPhoneOS17.5.sdk"
           git sparse-checkout set --no-cone "$SDK_VERSION"
           git checkout
           
-          # Check if the SDK directory was created before moving
           if [ -d "$SDK_VERSION" ]; then
             mv "$SDK_VERSION" $THEOS/sdks/
           else
@@ -104,6 +102,9 @@ jobs:
 
       - name: Build EeveeSpotifyReborn Debs
         run: |
+          # First, build Swift Package dependencies
+          swift build --product EeveeSpotifyC --configuration release
+          # Now, build the tweak package with Theos
           make clean package FINALPACKAGE=1
         env:
           THEOS: ${{ github.workspace }}/theos
