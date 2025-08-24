@@ -9,7 +9,13 @@ on:
         description: "URL to the decrypted Spotify IPA file"
         required: true
         type: string
-      
+        
+      tweak_version:
+        description: "The version of EeveeSpotify to use. Get from Releases page."
+        default: "6.1.2" # You can change this default to the latest version
+        required: true
+        type: string
+
       display_name:
         description: "App Name (Optional)"
         default: "Spotify"
@@ -21,12 +27,6 @@ on:
         default: "com.spotify.client"
         required: false
         type: string
-      
-      info_note:
-        description: "NOTE: This workflow builds from the latest commit."
-        default: "Ensure the provided IPA is compatible."
-        type: string
-        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,15 +40,13 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout EeveeSpotifyReborn Repository
+      - name: Checkout Workflow Repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Hide sensitive IPA URL
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: bundle_id,display_name,info_note
+          exclude_inputs: bundle_id,display_name,tweak_version
 
       - name: Download and validate IPA
         run: |
@@ -61,83 +59,33 @@ jobs:
             exit 1
           fi
 
-      - name: Install Build Dependencies
-        run: brew install dpkg ldid
-
-      - name: Cache Theos
-        id: theos
-        uses: actions/cache@v4
-        with:
-          path: theos/
-          key: ${{ runner.os }}-theos-cache
-
-      - name: Setup Theos
-        if: steps.theos.outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: theos/theos
-          path: ${{ github.workspace }}/theos
-          submodules: recursive
-
-      - name: Download iOS SDK
-        if: steps.theos.outputs.cache-hit != 'true'
-        run: |
-          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
-          cd sdks
-          
-          # Dynamically find the latest available SDK version in the repository
-          echo "Searching for the latest available SDK..."
-          SDK_VERSION=$(git ls-tree --name-only HEAD | grep '\.sdk$' | sort -V | tail -n 1)
-          
-          if [ -z "$SDK_VERSION" ]; then
-            echo "::error::Could not find any available SDKs in the theos/sdks repository."
-            exit 1
-          fi
-          
-          echo "Found latest SDK: $SDK_VERSION. Attempting to check it out."
-          
-          git sparse-checkout set --no-cone "$SDK_VERSION"
-          git checkout
-          
-          if [ -d "$SDK_VERSION" ]; then
-            echo "Successfully checked out $SDK_VERSION."
-            mv "$SDK_VERSION" $THEOS/sdks/
-          else
-            echo "::error::Failed to checkout SDK ($SDK_VERSION) even after finding it in the repository list."
-            exit 1
-          fi
-        env:
-          THEOS: ${{ github.workspace }}/theos
-
       - name: Install IPA Patcher (pyzule-rw)
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
-      - name: Build EeveeSpotifyReborn Debs
+      - name: Download EeveeSpotifyReborn Debs
         run: |
-          swift build --product EeveeSpotifyC --configuration release
-          make clean package FINALPACKAGE=1
-        env:
-          THEOS: ${{ github.workspace }}/theos
+          # Download EeveeSpotifyReborn Tweak
+          wget -q "https://github.com/whoeevee/EeveeSpotifyReborn/releases/download/${{ inputs.tweak_version }}/com.eevee.spotify_${{ inputs.tweak_version }}_iphoneos-arm64.deb" -O eevee.deb
+
+          
+          # Download Swift Protobuf dependency
+          # Note: The version of this dependency might not always match the tweak version.
+          # We will assume it's available on the same release page for simplicity.
+          # You may need to adjust this if the developer packages it differently in the future.
+          protobuf_version=$(curl -s "https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}" | grep "org.swift.protobuf" | grep "browser_download_url" | head -n 1 | cut -d '"' -f 4 | cut -d'_' -f 2)
+          if [ -z "$protobuf_version" ]; then
+             echo "::warning::Could not dynamically find protobuf version, falling back to tweak version."
+             protobuf_version="${{ inputs.tweak_version }}"
+          fi
+          wget -q "https://github.com/whoeevee/EeveeSpotifyReborn/releases/download/${{ inputs.tweak_version }}/org.swift.protobuf.swiftprotobuf_${protobuf_version}_iphoneos-arm64.deb" -O protobuf.deb
+
 
       - name: Inject tweaks into IPA
         id: inject
         run: |
-          eevee_deb=$(find packages -name 'com.whoeevee.eeveespotifyreborn_*.deb')
-          protobuf_deb=$(find packages -name 'org.swift.protobuf.swiftprotobuf_*.deb')
+          output_ipa_name="EeveeSpotifyReborn_${{ inputs.tweak_version }}.ipa"
           
-          if [ -z "$eevee_deb" ] || [ -z "$protobuf_deb" ]; then
-            echo "::error::Could not find generated .deb files."
-            exit 1
-          fi
-
-          tweaks_to_inject="$eevee_deb $protobuf_deb"
-          
-          app_version=$(grep -o 'Version: .*' control | cut -d' ' -f2)
-          echo "tweak_version=${app_version}" >> $GITHUB_OUTPUT
-
-          output_ipa_name="EeveeSpotifyReborn_${app_version}.ipa"
-
-          cyan -i spotify.ipa -o "$output_ipa_name" -uwef $tweaks_to_inject -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
+          cyan -i spotify.ipa -o "$output_ipa_name" -uwef eevee.deb protobuf.deb -n "${{ inputs.display_name }}" -b "${{ inputs.bundle_id }}"
           
           echo "output_name=${output_ipa_name}" >> $GITHUB_OUTPUT
 
@@ -145,7 +93,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: esp-${{ github.run_number }}
-          name: EeveeSpotifyReborn v${{ steps.inject.outputs.tweak_version }} (${{ github.run_number }})
+          name: EeveeSpotifyReborn v${{ inputs.tweak_version }} (${{ github.run_number }})
           files: ${{ steps.inject.outputs.output_name }}
           draft: false
           
