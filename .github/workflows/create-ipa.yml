@@ -11,8 +11,8 @@ on:
         type: string
         
       tweak_version:
-        description: "The version of EeveeSpotify to use. Get from the Releases page (e.g., 6.1.2)."
-        default: "6.1.2" # You can change this default to the latest version
+        description: "The version of EeveeSpotify to use. (e.g., 6.1.2)"
+        default: "6.1.2"
         required: true
         type: string
 
@@ -59,28 +59,31 @@ jobs:
             exit 1
           fi
 
-      - name: Install IPA Patcher (pyzule-rw)
-        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+      - name: Install Dependencies
+        run: |
+          brew install jq
+          pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
       - name: Download EeveeSpotifyReborn Debs
         id: download_debs
         run: |
-          RELEASE_API_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}"
+          # Corrected tag format with 'swift' prefix
+          TAG="swift${{ inputs.tweak_version }}"
+          RELEASE_API_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/$TAG"
           
-          # Fetch the list of assets from the release API
-          ASSETS_JSON=$(curl -s "$RELEASE_API_URL")
+          ASSETS_JSON=$(curl -sL "$RELEASE_API_URL")
           
-          # Reliably parse the JSON to find the correct download URLs
-          EEVEE_DEB_URL=$(echo "$ASSETS_JSON" | grep -o 'browser_download_url": ".*com.whoeevee.eeveespotifyreborn.*"' | cut -d '"' -f 4)
-          PROTOBUF_DEB_URL=$(echo "$ASSETS_JSON" | grep -o 'browser_download_url": ".*org.swift.protobuf.*"' | cut -d '"' -f 4)
+          # Corrected file name pattern to 'com.eevee.spotify'
+          EEVEE_DEB_URL=$(echo "$ASSETS_JSON" | jq -r '.assets[] | select(.name | contains("com.eevee.spotify_")) | .browser_download_url')
+          PROTOBUF_DEB_URL=$(echo "$ASSETS_JSON" | jq -r '.assets[] | select(.name | contains("org.swift.protobuf")) | .browser_download_url')
 
-          if [ -z "$EEVEE_DEB_URL" ]; then
-            echo "::error::Could not find EeveeSpotifyReborn .deb URL for version ${{ inputs.tweak_version }}. Please check if the version tag is correct and assets exist."
+          if [ -z "$EEVEE_DEB_URL" ] || [ "$EEVEE_DEB_URL" == "null" ]; then
+            echo "::error::Could not find EeveeSpotifyReborn .deb URL for tag $TAG. Please check if the version tag is correct."
             exit 1
           fi
           
-          if [ -z "$PROTOBUF_DEB_URL" ]; then
-            echo "::error::Could not find SwiftProtobuf .deb URL for version ${{ inputs.tweak_version }}. Please check if the version tag is correct and assets exist."
+          if [ -z "$PROTOBUF_DEB_URL" ] || [ "$PROTOBUF_DEB_URL" == "null" ]; then
+            echo "::error::Could not find SwiftProtobuf .deb URL for tag $TAG. Please check if the dependency exists for this version."
             exit 1
           fi
 
