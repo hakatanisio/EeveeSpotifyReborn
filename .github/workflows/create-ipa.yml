@@ -11,7 +11,7 @@ on:
         type: string
         
       tweak_version:
-        description: "The version of EeveeSpotify to use. Get from Releases page."
+        description: "The version of EeveeSpotify to use. Get from the Releases page."
         default: "6.1.2" # You can change this default to the latest version
         required: true
         type: string
@@ -43,10 +43,10 @@ jobs:
       - name: Checkout Workflow Repository
         uses: actions/checkout@v4
 
-      - name: Hide sensitive IPA URL
+      - name: Hide sensitive inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: bundle_id,display_name,tweak_version
+          exclude_inputs: bundle_id,display_name
 
       - name: Download and validate IPA
         run: |
@@ -64,21 +64,27 @@ jobs:
 
       - name: Download EeveeSpotifyReborn Debs
         run: |
-          # Download EeveeSpotifyReborn Tweak
-          wget -q "https://github.com/whoeevee/EeveeSpotifyReborn/releases/download/${{ inputs.tweak_version }}/com.eevee.spotify_${{ inputs.tweak_version }}_iphoneos-arm64.deb" -O eevee.deb
-
+          RELEASE_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}"
           
-          # Download Swift Protobuf dependency
-          # Note: The version of this dependency might not always match the tweak version.
-          # We will assume it's available on the same release page for simplicity.
-          # You may need to adjust this if the developer packages it differently in the future.
-          protobuf_version=$(curl -s "https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}" | grep "org.swift.protobuf" | grep "browser_download_url" | head -n 1 | cut -d '"' -f 4 | cut -d'_' -f 2)
-          if [ -z "$protobuf_version" ]; then
-             echo "::warning::Could not dynamically find protobuf version, falling back to tweak version."
-             protobuf_version="${{ inputs.tweak_version }}"
+          # Use curl and jq to reliably get the download URLs for both deb files
+          EEVEE_DEB_URL=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | grep "com.whoeevee.eeveespotifyreborn" | cut -d '"' -f 4)
+          PROTOBUF_DEB_URL=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | grep "org.swift.protobuf" | cut -d '"' -f 4)
+          
+          if [ -z "$EEVEE_DEB_URL" ]; then
+            echo "::error::Could not find EeveeSpotifyReborn .deb URL for version ${{ inputs.tweak_version }}"
+            exit 1
           fi
-          wget -q "https://github.com/whoeevee/EeveeSpotifyReborn/releases/download/${{ inputs.tweak_version }}/org.swift.protobuf.swiftprotobuf_${protobuf_version}_iphoneos-arm64.deb" -O protobuf.deb
+          
+          if [ -z "$PROTOBUF_DEB_URL" ]; then
+            echo "::error::Could not find SwiftProtobuf .deb URL for version ${{ inputs.tweak_version }}"
+            exit 1
+          fi
 
+          echo "Downloading Tweak from $EEVEE_DEB_URL"
+          wget -q "$EEVEE_DEB_URL" -O eevee.deb
+          
+          echo "Downloading Dependency from $PROTOBUF_DEB_URL"
+          wget -q "$PROTOBUF_DEB_URL" -O protobuf.deb
 
       - name: Inject tweaks into IPA
         id: inject
