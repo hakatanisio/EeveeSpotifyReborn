@@ -11,7 +11,7 @@ on:
         type: string
         
       tweak_version:
-        description: "The version of EeveeSpotify to use. Get from the Releases page."
+        description: "The version of EeveeSpotify to use. Get from the Releases page (e.g., 6.1.2)."
         default: "6.1.2" # You can change this default to the latest version
         required: true
         type: string
@@ -50,7 +50,7 @@ jobs:
 
       - name: Download and validate IPA
         run: |
-          wget -q "${{ inputs.ipa_url }}" -O ${{ github.workspace }}/spotify.ipa
+          wget -q -O ${{ github.workspace }}/spotify.ipa "${{ inputs.ipa_url }}"
           
           file_type=$(file --mime-type -b ${{ github.workspace }}/spotify.ipa)
           
@@ -66,17 +66,19 @@ jobs:
         run: |
           RELEASE_URL="https://api.github.com/repos/whoeevee/EeveeSpotifyReborn/releases/tags/${{ inputs.tweak_version }}"
           
-          # Use curl and jq to reliably get the download URLs for both deb files
-          EEVEE_DEB_URL=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | grep "com.whoeevee.eeveespotifyreborn" | cut -d '"' -f 4)
-          PROTOBUF_DEB_URL=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | grep "org.swift.protobuf" | cut -d '"' -f 4)
+          # Use curl and robust grep to get the download URLs for both deb files
+          ASSETS_URLS=$(curl -s "$RELEASE_URL" | grep "browser_download_url" | cut -d '"' -f 4)
+          
+          EEVEE_DEB_URL=$(echo "$ASSETS_URLS" | grep "com.whoeevee.eeveespotifyreborn")
+          PROTOBUF_DEB_URL=$(echo "$ASSETS_URLS" | grep "org.swift.protobuf")
           
           if [ -z "$EEVEE_DEB_URL" ]; then
-            echo "::error::Could not find EeveeSpotifyReborn .deb URL for version ${{ inputs.tweak_version }}"
+            echo "::error::Could not find EeveeSpotifyReborn .deb URL for version ${{ inputs.tweak_version }}. Please check if the version tag is correct and assets exist."
             exit 1
           fi
           
           if [ -z "$PROTOBUF_DEB_URL" ]; then
-            echo "::error::Could not find SwiftProtobuf .deb URL for version ${{ inputs.tweak_version }}"
+            echo "::error::Could not find SwiftProtobuf .deb URL for version ${{ inputs.tweak_version }}. Please check if the version tag is correct and assets exist."
             exit 1
           fi
 
