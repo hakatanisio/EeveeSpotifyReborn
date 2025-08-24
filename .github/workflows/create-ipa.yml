@@ -84,9 +84,18 @@ jobs:
         run: |
           git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
           cd sdks
-          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          # Corrected to a recent, available SDK version
+          SDK_VERSION="iPhoneOS17.5.sdk"
+          git sparse-checkout set --no-cone "$SDK_VERSION"
           git checkout
-          mv *.sdk $THEOS/sdks
+          
+          # Check if the SDK directory was created before moving
+          if [ -d "$SDK_VERSION" ]; then
+            mv "$SDK_VERSION" $THEOS/sdks/
+          else
+            echo "::error::Failed to checkout SDK: $SDK_VERSION"
+            exit 1
+          fi
         env:
           THEOS: ${{ github.workspace }}/theos
 
@@ -102,7 +111,6 @@ jobs:
       - name: Inject tweaks into IPA
         id: inject
         run: |
-          # Find the generated deb files
           eevee_deb=$(find packages -name 'com.whoeevee.eeveespotifyreborn_*.deb')
           protobuf_deb=$(find packages -name 'org.swift.protobuf.swiftprotobuf_*.deb')
           
@@ -111,10 +119,8 @@ jobs:
             exit 1
           fi
 
-          # Prepare arguments for injection
           tweaks_to_inject="$eevee_deb $protobuf_deb"
           
-          # Get the app version from the control file
           app_version=$(grep -o 'Version: .*' control | cut -d' ' -f2)
           echo "tweak_version=${app_version}" >> $GITHUB_OUTPUT
 
